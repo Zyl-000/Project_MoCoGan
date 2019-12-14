@@ -87,4 +87,4 @@ class getGRU(Model):
         return outputs
     
     def initHidden(self, batch_size):
-        self.hidden = numpy.array(tf.zeros(batch_size, self.hidden_size))
+        self.hidden = tf.Variable(tf.zeros(batch_size, self.hidden_size))
