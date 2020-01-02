@@ -130,11 +130,14 @@ def bp_v(inputs, y, retain=False):
 
 def gen_z(n_frames):
     z_C = tf.Variable(tf.random.normal((batch_size,d_C)))
-    z_C = z_C.unsqueeze(1).repeat(1,n_frames,1)
+    z_C = tf.expand_dims(z_C,1)
+    z_C = tf.tile(z_C,(1,n_frames,1))
     eps = tf.Variable(tf.random.normal((batch_size, d_E)))
     gru.initHidden(batch_size)
-    z = tf.concat(2,(z_M,z_C))
-    return z.reshape((batch_size, n_frames, nz, 1, 1))
+    z_M = tf.transpose(gru(eps, n_frames),[1,0])
+    z = tf.concat([z_M,z_C],2)
+    z = tf.reshape(z,(batch_size, n_frames, nz, 1, 1))
+    return z
 
 ''' train models '''
 
@@ -149,11 +152,11 @@ for epoch in range(1, n_iter+1):
     Z = gen_z(n_frames)
     Z = trim_noise(Z)
     #generate videos
-    Z = Z.reshape((batch_size*T,nz,1,1))
+    Z = tf.reshape(Z,(batch_size*T,nz,1,1))
     fake_videos = gen_i(Z)
     fake_videos = fake_videos.reshape((batch_size,T,nc,img_size,img_size))
     # transpose => (batch_size, nc, T, img_size, img_size)
-    fake_videos = fake_videos.transpose(2,1)
+    fake_videos = tf.transpose(fake_videos,[0,2,1,3,4])
     #sample image
     fake_img = fake_videos[:,:,np.random.randint(0,T),:,:]
 
@@ -163,10 +166,3 @@ for epoch in range(1, n_iter+1):
     #image
 
     ''' train generator '''
-
-    if epoch % 100 == 0:
-        print('[%d/%d] (%s) Loss_Di: %.4f Loss_Dv: %.4f Loss_Gi: %.4f Loss_Gv: %.4f Di_real_mean %.4f Di_fake_mean %.4f Dv_real_mean %.4f Dv_fake_mean %.4f'
-              % (epoch, n_iter, timeSince(start_time), err_Di, err_Dv, err_Gi, err_Gv, Di_real_mean, Di_fake_mean, Dv_real_mean, Dv_fake_mean))
-
-    if epoch % 1000 == 0:
-        save_video(fake_videos[0].data.cpu().numpy().transpose(1, 2, 3, 0), epoch)
