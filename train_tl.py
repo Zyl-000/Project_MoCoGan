@@ -177,7 +177,7 @@ def bp(real_img, real_videos, n_frames):
 start_time = time.time()
 dis_i.train()
 dis_v.train()
-#gen_i.train()
+gen_i.train()
 gru.train()
 print('(%s) Begin training'%(timeSince(start_time)))
 for epoch in range(1, n_iter+1):
