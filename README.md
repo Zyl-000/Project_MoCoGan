@@ -1,2 +1,2 @@
-# Project_MoCoGan
-Trying to implement MoCoGan by tensorlayer
+# MoCoGAN: Decomposing Motion and Content for Video Generation
+A tensorlayer implementation of Motion Content Generative Adversarial Network
