@@ -7,10 +7,8 @@ import skvideo.io
 import tensorflow as tf
 import tensorlayer as tl
 from model_tl import discriminator_I, discriminator_V,generator_I, getGRU
-import torch
 
 seed = 0
-torch.manual_seed(seed)
 np.random.seed(seed)
 batch_size = 16
 n_iter = 120000
@@ -45,9 +43,11 @@ def trim_noise(noise):
 
 def random_choice():
     X = []
+    print(videos.shape)
     for _ in range(batch_size):
         video = videos[np.random.randint(0, n_videos-1)]
-        video = torch.Tensor(trim(video))
+        print('video shape:')
+        print(video.shape)
         X.append(video)
     X = tf.stack(X)
     return X
@@ -68,13 +68,15 @@ d_C = 50
 d_M = d_E
 nz  = d_C + d_M
 
+lr = 0.0002
+real_value = 0.9
 dis_i = discriminator_I(nc, ndf)
 dis_v = discriminator_V(nc, ndf,T)
 gen_i = generator_I(nc, ngf, nz)
 gru = getGRU(d_E, hidden_size)
 
 ''' prepare for train '''
-label = tf.constant(0,tf.float32)
+label = tf.zeros([])
 
 def timeSince(since):
     now = time.time()
@@ -86,10 +88,6 @@ def timeSince(since):
     return '%dd %dh %dm %ds' % (d, h, m, s)
 
 trained_path = os.path.join(current_path, 'trained_models')
-def checkpoint(model, optimizer, epoch):
-    filename = os.path.join(trained_path, '%s_epoch-%d' % (model.__class__.__name__, epoch))
-    torch.save(model.state_dict(), filename + '.model')
-    torch.save(optimizer.state_dict(), filename + '.state')
 
 def save_video(fake_video, epoch):
     outputdata = fake_video * 255
@@ -99,32 +97,13 @@ def save_video(fake_video, epoch):
     skvideo.io.vwrite(file_path, outputdata)
 
 ''' setup optimizer '''
-lr = 0.0002
+
 optim_di = tf.optimizers.Adam(lr,0.5,0.999)
 optim_dv = tf.optimizers.Adam(lr,0.5,0.999)
 optim_gi = tf.optimizers.Adam(lr,0.5,0.999)
 optim_gru = tf.optimizers.Adam(lr,0.5,0.999)
 
-''' calculate grad of models '''
-#我不会用tf写自动求导，以下是pytorch版本
-'''
-def bp_i(inputs, y, retain=False):
-    label.resize_(inputs.size(0)).fill_(y)
-    labelv = Variable(label)
-    outputs = dis_i(inputs)
-    err = criterion(outputs, labelv)
-    err.backward(retain_graph=retain)
-    return err.data[0], outputs.data.mean()
-
-def bp_v(inputs, y, retain=False):
-    label.resize_(inputs.size(0)).fill_(y)
-    labelv = Variable(label)
-    outputs = dis_v(inputs)
-    err = criterion(outputs, labelv)
-    err.backward(retain_graph=retain)
-    return err.data[0], outputs.data.mean()
-'''
-
+criterion = tl.cost.binary_cross_entropy
 
 ''' generate input noise for fake vedio '''
 
@@ -139,8 +118,68 @@ def gen_z(n_frames):
     z = tf.reshape(z,(batch_size, n_frames, nz, 1, 1))
     return z
 
-''' train models '''
+''' calculate gradient and back propagation '''
+def bp(real_img, real_videos, n_frames):
+    print("IN BP")
+    print("real_img.shape=")
+    print(real_img.shape)
+    print("real_videos.shape=")
+    print(real_videos.shape)
+    print("n_frames.shape=")
+    print(n_frames.shape)
+    with tf.GradientTape(persistent=True) as tape:
+        output_real_I = dis_i(real_img)
+        output_real_V = dis_v(real_videos)
+        ''''''
+        print("output real")
+        print(output_real_I)
+        print(output_real_I.shape)
+        print(output_real_V)
+        print(output_real_V.shape)
+        ''''''
+        Z = gen_z(n_frames)
+        Z = trim_noise(Z)
+        #generate videos
+        Z = tf.reshape(Z,(batch_size*T,nz,1,1))
+        fake_videos = gen_i(Z)
+        fake_videos = fake_videos.reshape((batch_size,T,nc,img_size,img_size))
+        # transpose => (batch_size, nc, T, img_size, img_size)
+        fake_videos = tf.transpose(fake_videos,[0,2,1,3,4])
+        #sample image
+        fake_img = fake_videos[:,:,np.random.randint(0,T),:,:]
+        output_fake_I = dis_i(fake_img)
+        output_fake_V = dis_v(fake_videos)
+        ''''''
+        print("output fake")
+        print(output_fake_I)
+        print(output_fake_I.shape)
+        print(output_fake_V)
+        print(output_fake_V.shape)
+        ''''''
+        err_real_I = criterion(output_real_I, 0.9)
+        err_real_V = criterion(output_real_V, 0.9)
+        err_fake_I = criterion(output_fake_I, 0.0)
+        err_fake_V = criterion(output_fake_V, 0.0)
+        err_I = err_real_I + err_fake_I
+        err_V = err_real_V + err_fake_V
 
+        err_fake_GI = criterion(output_fake_I, 0.9)
+        err_fake_Gv = criterion(output_fake_V, 0.9)
+    grad_di = tape.gradient(err_I, dis_i.trainable_weights)
+    grad_dv = tape.gradient(err_V, dis_v.trainable_weights)
+    grad_gi = tape.gradient(err_fake_GI, gen_i.trainable_weights)
+    grad_gru = tape.gradient(err_fake_Gv, gru.trainable_weights)
+
+    return err_I, err_V, err_fake_GI, err_fake_Gv
+
+
+''' train models '''
+start_time = time.time()
+dis_i.train()
+dis_v.train()
+#gen_i.train()
+gru.train()
+print('(%s) Begin training'%(timeSince(start_time)))
 for epoch in range(1, n_iter+1):
     ''' prepare real images '''
     real_videos = random_choice()
@@ -149,20 +188,12 @@ for epoch in range(1, n_iter+1):
 
     ''' prepare fake images '''
     n_frames = video_lengths[np.random.randint(0,n_videos)]
-    Z = gen_z(n_frames)
-    Z = trim_noise(Z)
-    #generate videos
-    Z = tf.reshape(Z,(batch_size*T,nz,1,1))
-    fake_videos = gen_i(Z)
-    fake_videos = fake_videos.reshape((batch_size,T,nc,img_size,img_size))
-    # transpose => (batch_size, nc, T, img_size, img_size)
-    fake_videos = tf.transpose(fake_videos,[0,2,1,3,4])
-    #sample image
-    fake_img = fake_videos[:,:,np.random.randint(0,T),:,:]
+    err_I, err_V, err_fake_Gi, err_fake_Gv = bp(real_img, real_videos, n_frames)
 
-    ''' train discriminators '''
-    #video
-    dis_v
-    #image
+    if epoch % 100 == 0:
+        print('[%d/%d] (%s) Err_I: %.4f Err_V: %.4f Err_fake_Gi: %.4f Err_fake_Gv: %.4f'%(epoch,n_iter,timeSince(start_time),err_I,err_V,err_fake_Gi,err_fake_Gv))
 
-    ''' train generator '''
+dis_i.save('discriminator_I.h5')
+dis_v.save('discriminator_V.h5')
+gen_i.save('generator_I.h5')
+gru.save('GRU.h5')
