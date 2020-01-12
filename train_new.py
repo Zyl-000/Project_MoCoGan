@@ -149,11 +149,11 @@ def bp(real_img_, real_videos_):
         print(fake_videos.shape)
         '''
         # sample image
-        fake_img = fake_videos[:, 0, :, :, :]
+        fake_img = fake_videos[:, np.random.randint(0, T), :, :, :]
         # print(fake_img.shape)
         output_fake_I = tf.reshape(dis_i(fake_img),(batch_size,1))
         output_fake_V = tf.reshape(dis_v(fake_videos),(batch_size,1))
-
+        '''
         print('output real I:')
         print(output_real_I)
         print('outout real V:')
@@ -162,6 +162,7 @@ def bp(real_img_, real_videos_):
         print(output_fake_I)
         print('output fake V:')
         print(output_fake_V)
+        '''
         err_real_I = criterion(output_real_I, tl.alphas_like(output_real_I, 1.0))
         err_real_V = criterion(output_real_V, tl.alphas_like(output_real_V, 1.0))
         err_fake_I = criterion(output_fake_I, tl.alphas_like(output_fake_I, 0.0))
@@ -175,7 +176,11 @@ def bp(real_img_, real_videos_):
     optim_gi.apply_gradients(zip(grad_gi, gen_i.trainable_weights))
     grad_gru = tape.gradient(err_fake_Gv, gru.trainable_weights)
     optim_gru.apply_gradients(zip(grad_gru, gru.trainable_weights))
-
+    '''
+    print('the generator:')
+    print(gen_i.trainable_weights)
+    print(gru.trainable_weights)
+    '''
     grad_di = tape.gradient(err_I, dis_i.trainable_weights)
     optim_di.apply_gradients(zip(grad_di, dis_i.trainable_weights))
     grad_dv = tape.gradient(err_V, dis_v.trainable_weights)
